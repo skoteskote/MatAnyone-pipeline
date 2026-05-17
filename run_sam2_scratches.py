@@ -1,4 +1,12 @@
-"""Propagate user's BW scratches mask from middle frame across full clip."""
+"""Propagate user's BW scratches mask from a seed frame across full clip.
+
+The seed frame can be:
+  - set manually via SEED_FRAME_IDX (e.g. = 31), or
+  - auto-detected from SEED_STILL_PATH (the unedited still you painted the mask on)
+    by finding the clip frame with the smallest pixel-difference to the still.
+
+If both are set, the manual index wins and we warn if the auto pick disagrees.
+"""
 import os
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
@@ -9,13 +17,48 @@ from sam2.build_sam import build_sam2_video_predictor
 
 FRAMES_DIR = "/tmp/fdn_frames"
 MASKS_DIR = "/tmp/fdn_masks"
-SEED_MASK_PATH = "/Users/jakob/Desktop/TheFoundation.00_01_23_01.Still001-bw-mask.jpg"
-SEED_FRAME_IDX = 31
+SEED_MASK_PATH  = "/Users/jakob/Desktop/TheFoundation.00_01_23_01.Still001-bw-mask.jpg"
+SEED_STILL_PATH = "/Users/jakob/Desktop/TheFoundation.00_01_23_01.Still001.jpg"  # set to None to skip auto-detect
+SEED_FRAME_IDX  = None   # set to an int to override auto-detection
 CKPT = "pretrained_models/sam2/sam2.1_hiera_base_plus.pt"
 CONFIG = "configs/sam2.1/sam2.1_hiera_b+.yaml"
 
+
+def autodetect_seed_frame(still_path, frames_dir, match_size=256):
+    """Return clip frame index whose content best matches the still."""
+    ref = cv2.imread(still_path)
+    if ref is None:
+        raise FileNotFoundError(still_path)
+    ref_small = cv2.resize(ref, (match_size, match_size)).astype(np.int32)
+    frame_paths = sorted(p for p in os.listdir(frames_dir) if p.endswith(".jpg"))
+    best_idx, best_mse = -1, float("inf")
+    for i, name in enumerate(frame_paths):
+        f = cv2.imread(os.path.join(frames_dir, name))
+        f_small = cv2.resize(f, (match_size, match_size)).astype(np.int32)
+        mse = float(np.mean((f_small - ref_small) ** 2))
+        if mse < best_mse:
+            best_idx, best_mse = i, mse
+    return best_idx, best_mse
+
 device = "mps" if torch.backends.mps.is_available() else "cpu"
-print(f"device: {device}, seed frame: {SEED_FRAME_IDX}")
+
+# Resolve seed frame index
+auto_idx, auto_mse = (None, None)
+if SEED_STILL_PATH:
+    auto_idx, auto_mse = autodetect_seed_frame(SEED_STILL_PATH, FRAMES_DIR)
+    print(f"auto-detect: best match is frame {auto_idx} (mse={auto_mse:.1f})")
+
+if SEED_FRAME_IDX is None:
+    if auto_idx is None:
+        raise RuntimeError("Set SEED_FRAME_IDX or SEED_STILL_PATH.")
+    seed_idx = auto_idx
+else:
+    seed_idx = SEED_FRAME_IDX
+    if auto_idx is not None and auto_idx != seed_idx:
+        print(f"warning: manual SEED_FRAME_IDX={seed_idx} disagrees with auto pick {auto_idx}")
+
+print(f"device: {device}, seed frame: {seed_idx}")
+SEED_FRAME_IDX = seed_idx
 
 # Load + resize seed mask to clip resolution
 frame0 = cv2.imread(os.path.join(FRAMES_DIR, "00000.jpg"))

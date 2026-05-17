@@ -100,10 +100,13 @@ Pick a sharp middle frame, open it in Photoshop / Affinity / GIMP, paint **white
 Edit the constants near the top of `run_sam2_scratches.py`:
 
 ```python
-SEED_MASK_PATH = "/path/to/your-bw-mask.png"
-SEED_FRAME_IDX = 31         # index of the frame your mask was painted on
-TARGET_SIZE = 1080          # match your master resolution
+SEED_MASK_PATH  = "/path/to/your-bw-mask.png"
+SEED_STILL_PATH = "/path/to/the-clean-still.jpg"  # the un-edited still your mask was painted on
+SEED_FRAME_IDX  = None       # leave None to auto-detect from SEED_STILL_PATH; override with an int if you know
+TARGET_SIZE     = 1080       # match your master resolution
 ```
+
+Auto-detect works by downsampling the still and each clip frame to 256² and picking the lowest-MSE match. For 59 frames it costs <1 s; longer clips scale linearly. If you already know the frame, set `SEED_FRAME_IDX` directly and the script will skip the scan.
 
 Then:
 
