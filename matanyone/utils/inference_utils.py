@@ -9,11 +9,26 @@ import torchvision
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.JPG', '.JPEG', '.PNG')
 VIDEO_EXTENSIONS = ('.mp4', '.mov', '.avi', '.MP4', '.MOV', '.AVI')
 
+def _read_video_pyav(path):
+    import av
+    container = av.open(path)
+    stream = container.streams.video[0]
+    fps = float(stream.average_rate) if stream.average_rate else 24.0
+    frames = []
+    for frame in container.decode(video=0):
+        frames.append(frame.to_ndarray(format='rgb24'))
+    container.close()
+    arr = np.stack(frames, axis=0)  # T, H, W, C (RGB)
+    return torch.from_numpy(arr).permute(0, 3, 1, 2).contiguous(), fps
+
 def read_frame_from_videos(frame_root):
     if frame_root.endswith(VIDEO_EXTENSIONS):  # Video file path
         video_name = os.path.basename(frame_root)[:-4]
-        frames, _, info = torchvision.io.read_video(filename=frame_root, pts_unit='sec', output_format='TCHW') # RGB
-        fps = info['video_fps']
+        if hasattr(torchvision.io, 'read_video'):
+            frames, _, info = torchvision.io.read_video(filename=frame_root, pts_unit='sec', output_format='TCHW') # RGB
+            fps = info['video_fps']
+        else:
+            frames, fps = _read_video_pyav(frame_root)
     else:
         video_name = os.path.basename(frame_root)
         frames = []

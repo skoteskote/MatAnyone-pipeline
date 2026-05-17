@@ -6,3 +6,11 @@ results/
 test_sample/
 pretrained_models/
 matting-logs/
+
+# Custom pipeline outputs / inputs
+results/
+masks/
+inputs/mask/mask-test*.png
+.venv/
+pretrained_models/sam2/
+__pycache__/
