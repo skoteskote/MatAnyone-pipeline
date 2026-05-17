@@ -91,48 +91,61 @@ ffmpeg -i results/<name>/<clip>_mask.mp4 \
 
 Input: one clip + one binary BW mask painted on a single non-blurry frame. Output: an inpainted clip with the marks gone.
 
-### Step 1 — paint the mask once
+### Step 1 — collect triplets in one folder
 
-Pick a sharp middle frame, open it in Photoshop / Affinity / GIMP, paint **white over every scratch/mark, black everywhere else**, export as PNG at the *same* resolution as the clip. Cover scratches + a couple of pixels of safety margin.
+For every clip, drop three files in the same folder, all with the same base name:
 
-### Step 2 — propagate the mask with SAM 2
-
-Edit the constants near the top of `run_sam2_scratches.py`:
-
-```python
-SEED_MASK_PATH  = "/path/to/your-bw-mask.png"
-SEED_STILL_PATH = "/path/to/the-clean-still.jpg"  # the un-edited still your mask was painted on
-SEED_FRAME_IDX  = None       # leave None to auto-detect from SEED_STILL_PATH; override with an int if you know
-TARGET_SIZE     = 1080       # match your master resolution
+```
+my-folder/
+  clip-A.mp4         clip-A.jpg        clip-A_mask.jpg
+  clip-B.mp4         clip-B.jpg        clip-B_mask.jpg
+  ...
 ```
 
-Auto-detect works by downsampling the still and each clip frame to 256² and picking the lowest-MSE match. For 59 frames it costs <1 s; longer clips scale linearly. If you already know the frame, set `SEED_FRAME_IDX` directly and the script will skip the scan.
+- `<name>.mp4` — the clip
+- `<name>.jpg` / `.png` / `.jpeg` — an **un-edited** still from somewhere in the clip
+- `<name>_mask.jpg` (or `.png`) — the **BW mask** painted on that still: white over scratches/marks, black everywhere else, at the clip's resolution
 
-Then:
+You don't need to know which frame the still is from — the script auto-locates it by MSE-matching the still against each clip frame at 256² (sub-second per clip).
+
+### Step 2 — propagate masks for all clips with SAM 2
 
 ```bash
-.venv/bin/python run_sam2_scratches.py
+.venv/bin/python run_sam2_scratches.py \
+    --in-dir /path/to/my-folder \
+    --out-dir results/scratches \
+    --target-size 1080 \
+    --propainter-dir ../ProPainter
 ```
 
-This decodes the clip to `/tmp/fdn_frames/`, propagates the mask both forward and backward from `SEED_FRAME_IDX`, writes per-frame mask PNGs to `/tmp/fdn_masks/`, and saves a magenta-overlay QA video at `results/scratches_mask_overlay.mp4`. **Look at the overlay first** — if SAM 2 lost the mask in some frames or grew it onto the foreground hand, repaint and retry.
+For each triplet you get:
 
-### Step 3 — run ProPainter
+```
+results/scratches/clip-A/
+    frames/             clip frames (input to ProPainter)
+    masks/              propagated mask PNGs
+    mask_overlay.mp4    magenta-over-source QA video — open this first
+    run_propainter.sh   ready-to-run command for the inpainting step
+```
+
+**Check `mask_overlay.mp4`** before running ProPainter — if SAM 2 lost the mask anywhere or grew it onto the hand, repaint with more coverage or paint on a sharper still.
+
+### Step 3 — run ProPainter per clip
 
 ```bash
-cd ../ProPainter
-python inference_propainter.py \
-    -i /tmp/fdn_frames \
-    -m /tmp/fdn_masks \
-    -o ../MatAnyone/results/scratches \
-    --width 1080 --height 1080 \
-    --mask_dilation 10 \
-    --ref_stride 4 \
-    --neighbor_length 16 \
-    --raft_iter 30 \
-    --save_fps 25
+bash results/scratches/clip-A/run_propainter.sh
+bash results/scratches/clip-B/run_propainter.sh
 ```
 
-Outputs land at `results/scratches/<frames-dir-name>/inpaint_out.mp4`.
+The generated scripts already include the recommended quality knobs (`--mask_dilation 10 --ref_stride 4 --neighbor_length 16 --raft_iter 30 --width 1080 --height 1080`). To use different values, override at script-generation time:
+
+```bash
+.venv/bin/python run_sam2_scratches.py \
+    --in-dir ... --out-dir ... \
+    --mask-dilation 12 --neighbor-length 20 --target-size 1080
+```
+
+Outputs land at `results/scratches/clip-A/inpaint/frames/inpaint_out.mp4`.
 
 ### Quality knobs
 
